@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>家庭一周晚餐菜单 · 2大1小</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -19,10 +22,10 @@
   body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
     background:var(--bg);color:var(--ink);line-height:1.6;-webkit-text-size-adjust:100%}
   header{background:linear-gradient(135deg,#e8772e,#d9651c);color:#fff;
-    padding:20px 16px 16px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+    padding:calc(env(safe-area-inset-top) + 20px) 16px 16px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.08)}
   header h1{font-size:21px;font-weight:700;letter-spacing:1px}
   header p{font-size:13px;opacity:.92;margin-top:4px}
-  .toolbar{position:sticky;top:0;z-index:5;display:flex;gap:8px;flex-wrap:wrap;
+  .toolbar{position:sticky;top:env(safe-area-inset-top);z-index:5;display:flex;gap:8px;flex-wrap:wrap;
     padding:12px 14px;background:var(--bg);border-bottom:1px solid var(--line);justify-content:center}
   .btn{padding:11px 18px;border-radius:22px;border:1px solid var(--line);background:var(--card);
     color:var(--ink);font-size:14px;cursor:pointer;transition:.15s;user-select:none;-webkit-tap-highlight-color:transparent}
@@ -83,7 +86,7 @@
   .ing li{display:flex;justify-content:space-between;align-items:baseline;padding:8px 12px;background:var(--bg);border-radius:10px;font-size:14px}
   .ing li .amt{color:var(--accent);font-weight:600;white-space:nowrap;margin-left:10px}
   .steps{font-size:14px;color:var(--ink);white-space:pre-line;background:var(--bg);padding:12px;border-radius:10px;line-height:1.8}
-  .fab{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:15;
+  .fab{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 16px);z-index:15;
     background:var(--accent);color:#fff;border:none;border-radius:26px;
     padding:14px 30px;font-size:16px;box-shadow:0 4px 16px rgba(232,119,46,.4);cursor:pointer;
     user-select:none;-webkit-tap-highlight-color:transparent}
@@ -92,7 +95,7 @@
   @media(max-width:1024px){
     .week{grid-template-columns:repeat(4,1fr)}
     .day{min-height:140px}
-    body{padding-bottom:86px}
+    body{padding-bottom:calc(env(safe-area-inset-bottom) + 86px)}
   }
   @media(min-width:1025px){
     .fab{display:none}
@@ -114,11 +117,17 @@
     .week{grid-template-columns:1fr}
   }
   @media print{
-    .toolbar,.addbtn,.close,.btn,.daynav,.search,.fab,.sheetfoot{display:none!important}
-    .overlay{position:static;display:block!important;background:none;padding:0}
-    .sheet{box-shadow:none;max-height:none;max-width:100%}
     body{background:#fff}
-    .week{grid-template-columns:repeat(6,1fr)}
+    .toolbar,.fab{display:none!important}
+    /* 默认打印周计划：隐藏所有弹窗 */
+    #picker,#detail,#shop{display:none!important}
+    /* 打印采购清单模式：只显示 shop */
+    body.print-shop header, body.print-shop #week, body.print-shop footer,
+    body.print-shop #picker, body.print-shop #detail{display:none!important}
+    body.print-shop #shop{display:block!important;position:static;background:none;padding:0}
+    body.print-shop #shop .sheet{box-shadow:none;max-height:none;max-width:100%;border-radius:0;width:100%}
+    body.print-shop .close, body.print-shop .daynav, body.print-shop .search,
+    body.print-shop .sheetfoot, body.print-shop .btn{display:none!important}
   }
   /* 手机/触摸设备：仅触摸反馈，不卡悬停高亮 */
   .btn,.item,.addbtn,.pick .pn,.rm,.close,.fab,.daynav button,.search input{touch-action:manipulation}
@@ -150,7 +159,7 @@
 
 <div class="toolbar">
   <button class="btn primary" onclick="genShop()">🛒 生成采购清单</button>
-  <button class="btn" onclick="window.print()">🖨 打印</button>
+  <button class="btn" onclick="closeShop();closePicker();closeDetail();window.print()">🖨 打印周计划</button>
   <button class="btn" onclick="clearAll()">🗑 清空整周</button>
 </div>
 
@@ -414,8 +423,9 @@ function genShop(){
     `<li><span>${r.name}<span class="sd">用于：${r.dishes.join('、')}</span></span>
      <span class="sa">${r.amt}</span></li>`).join('');
   document.getElementById('shop').classList.add('show');
+  document.body.classList.add('print-shop');
 }
-function closeShop(){document.getElementById('shop').classList.remove('show');}
+function closeShop(){document.getElementById('shop').classList.remove('show');document.body.classList.remove('print-shop');}
 
 renderWeek();
 
