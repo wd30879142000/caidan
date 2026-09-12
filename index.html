@@ -27,7 +27,7 @@
   .btn{padding:11px 18px;border-radius:22px;border:1px solid var(--line);background:var(--card);
     color:var(--ink);font-size:14px;cursor:pointer;transition:.15s;user-select:none;-webkit-tap-highlight-color:transparent}
   .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .btn:hover{filter:brightness(.97)}
+  .btn:active{transform:scale(.97)}
   .week{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;padding:6px 14px 24px}
   .day{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;
     display:flex;flex-direction:column;min-height:150px}
@@ -42,7 +42,7 @@
   .pick .rm{border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;padding:2px 6px}
   .addbtn{margin-top:8px;border:1px dashed var(--accent);color:var(--accent);background:none;
     border-radius:9px;padding:10px;font-size:14px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
-  .addbtn:hover{background:var(--accent-soft)}
+  .addbtn:active{background:var(--accent-soft)}
   .empty{color:var(--muted);font-size:12px;text-align:center;margin:auto 0;opacity:.7}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;
     justify-content:center;padding:16px;z-index:20;overflow-y:auto;-webkit-overflow-scrolling:touch}
@@ -61,7 +61,7 @@
   .list{padding:4px 16px 18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
   .item{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px;
     text-align:center;cursor:pointer;transition:.15s;user-select:none;-webkit-tap-highlight-color:transparent}
-  .item:hover{background:var(--accent-soft);border-color:var(--accent)}
+  .item:active{background:var(--accent-soft)}
   .item .ie{font-size:30px}
   .item .in{font-size:14px;font-weight:600;margin-top:4px}
   .item .ic{font-size:11px;color:var(--muted)}
@@ -76,7 +76,7 @@
   .daynav button{font-size:12px;padding:5px 10px;border:1px solid var(--line);background:var(--card);
     border-radius:16px;cursor:pointer}
   .pick .pn{cursor:pointer}
-  .pick .pn:hover{text-decoration:underline}
+  .pick .pn:active{opacity:.55}
   .sec{padding:16px 18px}
   .sec h3{font-size:14px;color:var(--accent);margin-bottom:10px}
   .ing{list-style:none;display:flex;flex-direction:column;gap:8px}
@@ -114,11 +114,31 @@
     .week{grid-template-columns:1fr}
   }
   @media print{
-    .toolbar,.addbtn,.close,.btn,.daynav,.search{display:none!important}
+    .toolbar,.addbtn,.close,.btn,.daynav,.search,.fab,.sheetfoot{display:none!important}
     .overlay{position:static;display:block!important;background:none;padding:0}
     .sheet{box-shadow:none;max-height:none;max-width:100%}
     body{background:#fff}
     .week{grid-template-columns:repeat(7,1fr)}
+  }
+  /* 手机/触摸设备：仅触摸反馈，不卡悬停高亮 */
+  .btn,.item,.addbtn,.pick .pn,.rm,.close,.fab,.daynav button,.search input{touch-action:manipulation}
+  .overlay{overscroll-behavior:contain}
+  .item.added{background:var(--accent);border-color:var(--accent)}
+  .item.added .in,.item.added .ic{color:#fff}
+  .item .tag{display:none}
+  .item.added .tag{display:inline-block;font-size:11px;background:rgba(255,255,255,.28);
+    border-radius:10px;padding:1px 8px;margin-top:5px}
+  .sheetfoot{position:sticky;bottom:0;background:var(--card);padding:12px 16px;
+    border-top:1px solid var(--line);text-align:center;z-index:2}
+  .toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+    background:rgba(0,0,0,.82);color:#fff;padding:11px 20px;border-radius:22px;
+    font-size:14px;z-index:60;opacity:0;transition:opacity .25s;pointer-events:none;max-width:80%}
+  .toast.show{opacity:1}
+  @media(hover:hover){
+    .btn:hover{filter:brightness(.97)}
+    .item:hover{background:var(--accent-soft);border-color:var(--accent)}
+    .addbtn:hover{background:var(--accent-soft)}
+    .pick .pn:hover{text-decoration:underline}
   }
 </style>
 </head>
@@ -149,6 +169,7 @@
     </div>
     <div class="search"><input id="psearch" type="text" placeholder="🔍 搜菜名 / 食材"></div>
     <div class="list" id="plist"></div>
+    <div class="sheetfoot"><button class="btn primary" style="width:100%;padding:14px;font-size:16px" onclick="closePicker()">完成</button></div>
   </div>
 </div>
 
@@ -164,6 +185,7 @@
     <ul class="shop" id="shoplist"></ul>
     <div style="text-align:center;padding:0 0 18px">
       <button class="btn primary" onclick="window.print()">🖨 打印此清单</button>
+      <button class="btn" onclick="closeShop()" style="margin-left:8px">关闭</button>
     </div>
   </div>
 </div>
@@ -320,13 +342,22 @@ function renderDayNav(){
 function switchDay(d){curDay=d;document.getElementById('pickerTitle').textContent='为 '+d+' 晚餐选择菜品';renderDayNav();}
 function renderPList(){
   const kw=document.getElementById('psearch').value.trim();
+  const cur=plan[curDay];
   const list=DISHES.map((x,i)=>({x,i})).filter(o=>!kw||o.x.name.includes(kw)||o.x.ings.some(g=>g[0].includes(kw)));
-  document.getElementById('plist').innerHTML=list.map(o=>
-    `<div class="item" onclick="addDish(${o.i})"><div class="ie">${o.x.emoji}</div>
-     <div class="in">${o.x.name}</div><div class="ic">${o.x.cat}·${o.x.time}</div></div>`).join('')
-     || '<p style="color:var(--muted);padding:16px">没有匹配</p>';
+  document.getElementById('plist').innerHTML=list.map(o=>{
+    const added=cur.includes(o.i);
+    return `<div class="item ${added?'added':''}" onclick="toggleDish(${o.i})"><div class="ie">${o.x.emoji}</div>
+     <div class="in">${o.x.name}</div><div class="ic">${o.x.cat}·${o.x.time}</div>
+     ${added?'<div class="tag">✓ 已加入</div>':''}</div>`;
+  }).join('') || '<p style="color:var(--muted);padding:16px">没有匹配</p>';
 }
-function addDish(idx){if(!plan[curDay].includes(idx))plan[curDay].push(idx);save();renderWeek();renderPList();}
+function toggleDish(idx){
+  const arr=plan[curDay];const p=arr.indexOf(idx);
+  if(p>=0){arr.splice(p,1);} else {arr.push(idx);showToast('已加入 '+curDay+' 晚餐');}
+  save();renderWeek();renderPList();
+}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),1200);}
 document.getElementById('psearch').addEventListener('input',renderPList);
 
 function parseAmt(a){
@@ -408,5 +439,6 @@ function openDetail(idx){
 function closeDetail(){document.getElementById('detail').classList.remove('show');}
 </script>
 <button class="fab" onclick="genShop()">🛒 生成采购清单</button>
+<div class="toast" id="toast"></div>
 </body>
 </html>
