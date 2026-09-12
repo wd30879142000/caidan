@@ -134,6 +134,12 @@
   /* 手机/触摸设备：仅触摸反馈，不卡悬停高亮 */
   .btn,.item,.addbtn,.pick .pn,.rm,.close,.fab,.daynav button,.search input{touch-action:manipulation}
   .overlay{overscroll-behavior:contain}
+  /* 分享图片弹窗 */
+  .shareimgs{padding:10px 16px 4px}
+  .pwrap{margin-bottom:18px}
+  .plabel{font-size:13px;color:var(--muted);margin:4px 2px}
+  .shareimgs img{width:100%;border:1px solid var(--line);border-radius:10px;display:block;
+    background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.06)}
   .item.added{background:var(--accent);border-color:var(--accent)}
   .item.added .in,.item.added .ic{color:#fff}
   .item .tag{display:none}
@@ -162,6 +168,7 @@
 <div class="toolbar">
   <button class="btn primary" onclick="genShop()">🛒 生成采购清单</button>
   <button class="btn" onclick="closeShop();closePicker();closeDetail();window.print()">🖨 打印周计划</button>
+  <button class="btn" onclick="openShare()">📤 分享图片</button>
   <button class="btn" onclick="clearAll()">🗑 清空整周</button>
 </div>
 
@@ -391,9 +398,10 @@ function parseAmt(a){
 }
 function round(n){return Number.isInteger(n)?n:(Math.round(n*10)/10);}
 
-function genShop(){
-  const map={};
-  let total=0;
+/* 采购清单合并算法（菜单页/分享图片共用） */
+const EXCLUDE_SET=new Set(['盐','白糖','冰糖','生抽','老抽','醋','料酒','香油','淀粉','蚝油','蒸鱼豉油','八角','白芝麻','水','热水']);
+function getShopRows(){
+  const map={};let total=0;
   DAYS.forEach(d=>plan[d].forEach(idx=>{
     total++;
     DISHES[idx].ings.forEach(([name,amt])=>{
@@ -401,34 +409,27 @@ function genShop(){
       map[name].dishes.add(DISHES[idx].name);
       const p=parseAmt(amt);
       if(p.free)map[name].free=true;
-      else{
-        const u=map[name].units;
-        if(!u[p.unit])u[p.unit]={nums:[],ranges:[]};
-        if(p.range)u[p.unit].ranges.push(p.range);
-        else u[p.unit].nums.push(p.num);
-      }
+      else{const u=map[name].units;if(!u[p.unit])u[p.unit]={nums:[],ranges:[]};
+        if(p.range)u[p.unit].ranges.push(p.range);else u[p.unit].nums.push(p.num);}
     });
   }));
-  if(total===0){alert('本周还没安排任何菜，先去添加吧～');return;}
-  // 调味品 / 无需采购项：从清单中剔除（家里常备，不必周末特意买）
-  const EXCLUDE=new Set(['盐','白糖','冰糖','生抽','老抽','醋','料酒','香油','淀粉','蚝油','蒸鱼豉油','八角','白芝麻','水','热水']);
   let rows=Object.keys(map).map(name=>{
-    const g=map[name];
-    let amt;
+    const g=map[name];let amt;
     if(g.free){amt='适量（按口味）';}
-    else{
-      const parts=[];
-      for(const u in g.units){
-        const o=g.units[u];let s=o.nums.reduce((a,b)=>a+b,0);let txt='';
-        if(o.nums.length)txt+=round(s);
-        if(o.ranges.length){if(txt)txt+=' 或 ';txt+=o.ranges.join('/');}
-        parts.push(txt+u);
-      }
-      amt=parts.join('、');
-    }
+    else{const parts=[];for(const u in g.units){const o=g.units[u];let s=o.nums.reduce((a,b)=>a+b,0);let txt='';
+      if(o.nums.length)txt+=round(s);
+      if(o.ranges.length){if(txt)txt+=' 或 ';txt+=o.ranges.join('/');}
+      parts.push(txt+u);}
+      amt=parts.join('、');}
     return {name,amt,dishes:[...g.dishes]};
-  }).filter(r=>!EXCLUDE.has(r.name));
+  }).filter(r=>!EXCLUDE_SET.has(r.name));
   rows.sort((a,b)=>(a.amt.startsWith('适量')?1:0)-(b.amt.startsWith('适量')?1:0));
+  return {rows,total};
+}
+
+function genShop(){
+  const {rows,total}=getShopRows();
+  if(total===0){alert('本周还没安排任何菜，先去添加吧～');return;}
   document.getElementById('shopSub').textContent='共 '+total+' 道菜 · 合并后 '+rows.length+' 种食材';
   document.getElementById('shoplist').innerHTML=rows.map(r=>
     `<li><span>${r.name}<span class="sd">用于：${r.dishes.join('、')}</span></span>
@@ -458,8 +459,98 @@ function openDetail(idx){
   document.getElementById('detail').classList.add('show');
 }
 function closeDetail(){document.getElementById('detail').classList.remove('show');}
+
+/* 分享：用原生 Canvas 绘制成图片（零依赖、离线可用） */
+function drawWrapped(ctx,text,x,y,maxW,lh,font,color){
+  ctx.font=font;ctx.fillStyle=color;
+  let line='',yy=y;const chars=Array.from(text);
+  for(const ch of chars){
+    const test=line+ch;
+    if(ctx.measureText(test).width>maxW && line){ctx.fillText(line,x,yy);yy+=lh;line=ch;}
+    else line=test;
+  }
+  if(line)ctx.fillText(line,x,yy);
+  return yy+lh;
+}
+function buildShareImage(kind){
+  const W=750,scale=2,pad=40,F='"PingFang SC","Microsoft YaHei",sans-serif';
+  let totalH=150,blocks=[];
+  if(kind==='menu'){
+    DAYS.forEach(d=>{
+      const items=plan[d].map(i=>({e:DISHES[i].emoji,n:DISHES[i].name}));
+      blocks.push({day:d,items});
+      totalH+=44+Math.max(1,items.length)*40+20;
+    });
+  }else{
+    const {rows,total}=getShopRows();
+    if(total===0) return null;
+    rows.forEach(r=>{blocks.push({r,used:'用于：'+r.dishes.join('、')});totalH+=34+22+14;});
+  }
+  totalH+=40;
+  const cv=document.createElement('canvas');
+  cv.width=W*scale;cv.height=Math.ceil(totalH)*scale;
+  const ctx=cv.getContext('2d');ctx.scale(scale,scale);
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,totalH);
+  const g=ctx.createLinearGradient(0,0,W,0);
+  g.addColorStop(0,'#e8772e');g.addColorStop(1,'#d9651c');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,150);
+  ctx.fillStyle='#fff';ctx.textAlign='center';
+  ctx.font='bold 40px '+F;
+  ctx.fillText(kind==='menu'?'家庭一周晚餐菜单':'周末采购清单',W/2,60);
+  ctx.font='22px '+F;
+  ctx.fillText(kind==='menu'?'2 大 1 小 · 周一至周六 · 家常清淡':'共 '+getShopRows().total+' 道菜 · 已自动剔除调味品',W/2,100);
+  let y=150+34;
+  if(kind==='menu'){
+    blocks.forEach(b=>{
+      ctx.textAlign='left';ctx.fillStyle='#d9651c';ctx.font='bold 28px '+F;
+      ctx.fillText(b.day,pad,y+4);
+      const x=pad+120;ctx.font='26px '+F;
+      if(!b.items.length){ctx.fillStyle='#bbb';ctx.fillText('— 未安排 —',x,y+4);}
+      else b.items.forEach((it,k)=>{ctx.fillStyle='#333';ctx.fillText(it.e+'  '+it.n,x,y+4+k*40);});
+      y+=44+Math.max(1,b.items.length)*40+20;
+      ctx.strokeStyle='#eee';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pad,y-10);ctx.lineTo(W-pad,y-10);ctx.stroke();
+    });
+  }else{
+    blocks.forEach(b=>{
+      ctx.textAlign='left';ctx.fillStyle='#333';ctx.font='26px '+F;
+      ctx.fillText(b.r.name,pad,y+4);
+      ctx.textAlign='right';ctx.fillStyle='#d9651c';ctx.font='bold 26px '+F;
+      ctx.fillText(b.r.amt,W-pad,y+4);
+      ctx.textAlign='left';
+      y=drawWrapped(ctx,b.used,pad,y+30,W-2*pad,22,'20px '+F,'#999');
+      y+=12;
+      ctx.strokeStyle='#f2f2f2';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pad,y-6);ctx.lineTo(W-pad,y-6);ctx.stroke();
+    });
+  }
+  return cv.toDataURL('image/png');
+}
+function openShare(){
+  const menuImg=buildShareImage('menu');
+  const shopImg=buildShareImage('shop');
+  if(!shopImg){alert('请先安排菜品、生成采购清单后再分享～');return;}
+  document.getElementById('shareMenu').src=menuImg;
+  document.getElementById('shareShop').src=shopImg;
+  document.getElementById('share').classList.add('show');
+}
+function closeShare(){document.getElementById('share').classList.remove('show');}
 </script>
 <button class="fab" onclick="genShop()">🛒 生成采购清单</button>
+
+<!-- share -->
+<div class="overlay" id="share" onclick="if(event.target===this)closeShare()">
+  <div class="sheet share">
+    <div class="top">
+      <button class="close" onclick="closeShare()">×</button>
+      <h2>分享给微信好友</h2>
+      <div class="sub">长按下方图片「存储到照片」→ 微信里发给好友（共 2 页）</div>
+    </div>
+    <div class="shareimgs">
+      <div class="pwrap"><div class="plabel">第 1 页 · 每日菜单</div><img id="shareMenu" alt="每日菜单"></div>
+      <div class="pwrap"><div class="plabel">第 2 页 · 采购清单</div><img id="shareShop" alt="采购清单"></div>
+    </div>
+    <div class="sheetfoot"><button class="btn primary" style="width:100%;padding:14px;font-size:16px" onclick="closeShare()">完成</button></div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 </body>
 </html>
