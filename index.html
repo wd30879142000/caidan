@@ -94,12 +94,21 @@
     user-select:none;-webkit-tap-highlight-color:transparent}
   .fab:active{filter:brightness(.95)}
   footer{text-align:center;font-size:12px;color:var(--muted);padding:0 0 30px}
-  @media(max-width:1024px){
-    .week{grid-template-columns:repeat(4,1fr)}
-    .day{min-height:140px}
-    body{padding-bottom:calc(env(safe-area-inset-bottom) + 86px)}
+  /* 平板（iPad mini 4：竖屏 768 / 横屏 1024）专属适配 */
+  @media(min-width:681px) and (max-width:1024px){
+    .week{grid-template-columns:repeat(3,1fr)}   /* 6 天 → 2×3 均衡排布，不再错位 */
+    .day{min-height:160px}
+    .toolbar{gap:10px;padding:14px}
+    .btn{padding:12px 22px;font-size:15px}        /* 平板触摸区域更大 */
+    .sheet{max-width:640px}                        /* 弹窗更宽，更好点 */
   }
-  @media(min-width:1025px){
+  /* 平板横屏：6 天一行铺满宽屏，省去纵向滚动 */
+  @media(min-width:681px) and (max-width:1024px) and (orientation:landscape){
+    .week{grid-template-columns:repeat(6,1fr)}
+    .day{min-height:210px}
+  }
+  /* 平板与桌面：隐藏手机专用悬浮按钮（顶部工具栏已有按钮） */
+  @media(min-width:681px){
     .fab{display:none}
   }
   @media(max-width:680px){
@@ -114,6 +123,7 @@
     .item .in{font-size:15px}
     .pick{font-size:14px;padding:8px}
     .addbtn{padding:12px;font-size:15px}
+    body{padding-bottom:calc(env(safe-area-inset-bottom) + 86px)}
   }
   @media(max-width:380px){
     .week{grid-template-columns:1fr}
@@ -140,6 +150,16 @@
   .plabel{font-size:13px;color:var(--muted);margin:4px 2px}
   .shareimgs img{width:100%;border:1px solid var(--line);border-radius:10px;display:block;
     background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+  /* 分享设置面板 */
+  .setbody{padding:14px 18px}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:12px;
+    padding:13px 0;border-bottom:1px solid var(--line)}
+  .row span{font-size:14px}
+  .row.col{flex-direction:column;align-items:stretch}
+  .row.col select,.row.col input{margin-top:7px;padding:10px 12px;border:1px solid var(--line);
+    border-radius:9px;font-size:15px;outline:none;background:var(--card);color:var(--ink);width:100%}
+  .row input[type=checkbox]{width:22px;height:22px;accent-color:var(--accent)}
+  .hint{font-size:12px;color:var(--muted);line-height:1.7;margin:14px 2px 0}
   .item.added{background:var(--accent);border-color:var(--accent)}
   .item.added .in,.item.added .ic{color:#fff}
   .item .tag{display:none}
@@ -168,6 +188,7 @@
 <div class="toolbar">
   <button class="btn primary" onclick="genShop()">🛒 生成采购清单</button>
   <button class="btn" onclick="closeShop();closePicker();closeDetail();window.print()">🖨 打印周计划</button>
+  <button class="btn" onclick="openSettings()">⚙ 分享设置</button>
   <button class="btn" onclick="openShare()">📤 分享图片</button>
   <button class="btn" onclick="clearAll()">🗑 清空整周</button>
 </div>
@@ -440,6 +461,8 @@ function genShop(){
 function closeShop(){document.getElementById('shop').classList.remove('show');document.body.classList.remove('print-shop');}
 
 renderWeek();
+loadSettings();
+bindSettings();
 
 /* dish detail */
 function openDetail(idx){
@@ -472,7 +495,7 @@ function drawWrapped(ctx,text,x,y,maxW,lh,font,color){
   if(line)ctx.fillText(line,x,yy);
   return yy+lh;
 }
-function buildShareImage(kind){
+function buildShareCanvas(kind){
   const W=750,scale=2,pad=40,F='"PingFang SC","Microsoft YaHei",sans-serif';
   let totalH=150,blocks=[];
   if(kind==='menu'){
@@ -522,17 +545,72 @@ function buildShareImage(kind){
       ctx.strokeStyle='#f2f2f2';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pad,y-6);ctx.lineTo(W-pad,y-6);ctx.stroke();
     });
   }
-  return cv.toDataURL('image/png');
+  return cv;
 }
+function buildShareImage(kind){return buildShareCanvas(kind).toDataURL('image/png');}
 function openShare(){
-  const menuImg=buildShareImage('menu');
-  const shopImg=buildShareImage('shop');
-  if(!shopImg){alert('请先安排菜品、生成采购清单后再分享～');return;}
-  document.getElementById('shareMenu').src=menuImg;
-  document.getElementById('shareShop').src=shopImg;
-  document.getElementById('share').classList.add('show');
+  const test=getShopRows();
+  if(test.total===0){alert('请先安排菜品、生成采购清单后再分享～');return;}
+  if(SET.autoShare && canShareFiles()){
+    shareViaSystem();
+  }else{
+    fallbackModal();
+  }
 }
 function closeShare(){document.getElementById('share').classList.remove('show');}
+
+/* 分享设置 + 系统分享（Web Share API） */
+const SET_KEY='familyMenuShare_v1';
+let SET={autoShare:false,format:'png',name:'家庭菜单',note:'本周晚餐菜单 & 采购清单'};
+function loadSettings(){try{const s=JSON.parse(localStorage.getItem(SET_KEY));if(s)SET=Object.assign(SET,s);}catch(e){}}
+function saveSettings(){try{localStorage.setItem(SET_KEY,JSON.stringify(SET));}catch(e){}}
+function mime(){return SET.format==='jpg'?'image/jpeg':'image/png';}
+function fileName(kind){return (SET.name||'家庭菜单')+(kind==='menu'?'_每日菜单':'_采购清单')+(SET.format==='jpg'?'.jpg':'.png');}
+function canShareFiles(){
+  try{return !!(navigator.share && navigator.canShare && navigator.canShare({files:[new File([new ArrayBuffer(1)],'t.png',{type:'image/png'})]}));}
+  catch(e){return false;}
+}
+function canvasToFile(cv,fname,m){
+  return new Promise((res,rej)=>{cv.toBlob(b=>{if(!b){rej(new Error('blob'));return;}res(new File([b],fname,{type:m}));},m,0.92);});
+}
+async function shareViaSystem(){
+  try{
+    const f1=await canvasToFile(buildShareCanvas('menu'),fileName('menu'),mime());
+    const f2=await canvasToFile(buildShareCanvas('shop'),fileName('shop'),mime());
+    if(navigator.canShare && !navigator.canShare({files:[f1,f2]})){fallbackModal();return;}
+    await navigator.share({files:[f1,f2],text:SET.note||'本周晚餐菜单 & 采购清单',title:'家庭一周晚餐菜单'});
+    showToast('已调起系统分享：选「微信」发给好友，或存到照片/文件');
+  }catch(e){
+    if(e&&e.name==='AbortError')return; // 用户取消，静默
+    fallbackModal();
+  }
+}
+function fallbackModal(){
+  document.getElementById('shareMenu').src=buildShareCanvas('menu').toDataURL('image/png');
+  document.getElementById('shareShop').src=buildShareCanvas('shop').toDataURL('image/png');
+  document.getElementById('share').classList.add('show');
+}
+function openSettings(){
+  document.getElementById('setAuto').checked=SET.autoShare;
+  document.getElementById('setFmt').value=SET.format;
+  document.getElementById('setName').value=SET.name;
+  document.getElementById('setNote').value=SET.note;
+  document.getElementById('settings').classList.add('show');
+}
+function closeSettings(){document.getElementById('settings').classList.remove('show');}
+function bindSettings(){
+  const auto=document.getElementById('setAuto');
+  auto.addEventListener('change',e=>{
+    if(e.target.checked && !confirm('开启后，点击「分享图片」会直接调起系统分享面板：可一键选「微信」发给好友，或存到照片/文件。是否开启？')){
+      e.target.checked=false;return;
+    }
+    SET.autoShare=e.target.checked;saveSettings();
+    showToast(SET.autoShare?'已开启一键分享':'已关闭，恢复手动长按保存');
+  });
+  document.getElementById('setFmt').addEventListener('change',e=>{SET.format=e.target.value;saveSettings();});
+  document.getElementById('setName').addEventListener('input',e=>{SET.name=e.target.value;saveSettings();});
+  document.getElementById('setNote').addEventListener('input',e=>{SET.note=e.target.value;saveSettings();});
+}
 </script>
 <button class="fab" onclick="genShop()">🛒 生成采购清单</button>
 
@@ -542,13 +620,32 @@ function closeShare(){document.getElementById('share').classList.remove('show');
     <div class="top">
       <button class="close" onclick="closeShare()">×</button>
       <h2>分享给微信好友</h2>
-      <div class="sub">长按下方图片「存储到照片」→ 微信里发给好友（共 2 页）</div>
+      <div class="sub">手动模式：长按图片「存储到照片」再发微信（共 2 页）· 想一键分享去「⚙ 分享设置」开启</div>
     </div>
     <div class="shareimgs">
       <div class="pwrap"><div class="plabel">第 1 页 · 每日菜单</div><img id="shareMenu" alt="每日菜单"></div>
       <div class="pwrap"><div class="plabel">第 2 页 · 采购清单</div><img id="shareShop" alt="采购清单"></div>
     </div>
     <div class="sheetfoot"><button class="btn primary" style="width:100%;padding:14px;font-size:16px" onclick="closeShare()">完成</button></div>
+  </div>
+</div>
+
+<!-- settings -->
+<div class="overlay" id="settings" onclick="if(event.target===this)closeSettings()">
+  <div class="sheet">
+    <div class="top">
+      <button class="close" onclick="closeSettings()">×</button>
+      <h2>分享设置</h2>
+      <div class="sub">设置后一键分享给微信好友</div>
+    </div>
+    <div class="setbody">
+      <label class="row"><span>一键分享<br><small style="color:var(--muted)">开启后点分享直接调起系统分享</small></span><input type="checkbox" id="setAuto"></label>
+      <label class="row col"><span>图片格式</span><select id="setFmt"><option value="png">PNG（清晰）</option><option value="jpg">JPG（体积小）</option></select></label>
+      <label class="row col"><span>文件命名</span><input type="text" id="setName" placeholder="家庭菜单" maxlength="20"></label>
+      <label class="row col"><span>分享附言</span><input type="text" id="setNote" placeholder="本周晚餐菜单 & 采购清单" maxlength="40"></label>
+      <p class="hint">说明：网页版无法直接写入手机存储路径、也不能在微信内自动选联系人。「一键分享」会调起<strong>系统分享面板</strong>——从中选「微信」即可选好友并发出（附言一并带过去）；选「存储到文件 / 添加到照片」即相当于保存。若需真正「自动存相册 + 微信内选人」，请用小程序版（可原生实现）。</p>
+    </div>
+    <div class="sheetfoot"><button class="btn primary" style="width:100%;padding:14px;font-size:16px" onclick="closeSettings()">完成</button></div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
