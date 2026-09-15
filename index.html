@@ -94,6 +94,13 @@
     user-select:none;-webkit-tap-highlight-color:transparent}
   .fab:active{filter:brightness(.95)}
   footer{text-align:center;font-size:12px;color:var(--muted);padding:0 0 30px}
+  .modtabs{display:flex;gap:10px;justify-content:center;padding:12px 14px 4px}
+  .modtab{flex:1;max-width:260px;padding:12px 8px;border-radius:14px;border:1px solid var(--line);
+    background:var(--card);color:var(--muted);font-size:15px;font-weight:600;cursor:pointer;
+    user-select:none;-webkit-tap-highlight-color:transparent;transition:.15s}
+  .modtab.active{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 3px 10px rgba(232,119,46,.3)}
+  .modtab:active{transform:scale(.98)}
+  @media(hover:hover){.modtab:hover{filter:brightness(.97)}}
   /* 平板（iPad mini 4：竖屏 768 / 横屏 1024）专属适配 */
   @media(min-width:681px) and (max-width:1024px){
     .week{grid-template-columns:repeat(3,1fr)}   /* 6 天 → 2×3 均衡排布，不再错位 */
@@ -171,6 +178,16 @@
     background:rgba(0,0,0,.82);color:#fff;padding:11px 20px;border-radius:22px;
     font-size:14px;z-index:60;opacity:0;transition:opacity .25s;pointer-events:none;max-width:80%}
   .toast.show{opacity:1}
+
+  /* 通用确认弹窗（替代原生 confirm，兼容 iOS 主屏独立模式） */
+  .cfm .sheet{max-width:380px;text-align:center;padding:22px 20px 18px}
+  .cfm .cm{font-size:16px;line-height:1.6;margin:6px 0 18px;color:var(--ink);white-space:pre-line}
+  .cfm .crow{display:flex;gap:12px}
+  .cfm .crow button{flex:1;padding:13px;border-radius:12px;font-size:15px;cursor:pointer;
+    border:1px solid var(--line);background:var(--card);color:var(--ink);user-select:none;-webkit-tap-highlight-color:transparent}
+  .cfm .crow .yes{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .cfm .crow .yes:active{filter:brightness(.94)}
+  .cfm .crow .no:active{background:var(--bg)}
   @media(hover:hover){
     .btn:hover{filter:brightness(.97)}
     .item:hover{background:var(--accent-soft);border-color:var(--accent)}
@@ -181,21 +198,27 @@
 </head>
 <body>
 <header>
-  <h1>🗓 家庭一周晚餐菜单</h1>
-  <p>周末排好下周 · 自动合并采购清单</p>
+  <h1 id="hTitle">🗓 家庭一周晚餐菜单</h1>
+  <p id="hSub">周末排好下周 · 自动合并采购清单</p>
 </header>
+
+<div class="modtabs">
+  <button class="modtab active" id="tabDinner" onclick="switchModule('dinner')">🌙 晚餐菜单</button>
+  <button class="modtab" id="tabBreakfast" onclick="switchModule('breakfast')">🌞 早餐菜单</button>
+</div>
 
 <div class="toolbar">
   <button class="btn primary" onclick="genShop()">🛒 生成采购清单</button>
   <button class="btn" onclick="closeShop();closePicker();closeDetail();window.print()">🖨 打印周计划</button>
   <button class="btn" onclick="openSettings()">⚙ 分享设置</button>
+  <button class="btn" id="btnBalance" onclick="autoBalance()" style="display:none">⚖️ 均衡搭配</button>
   <button class="btn" onclick="openShare()">📤 分享图片</button>
   <button class="btn" onclick="clearAll()">🗑 清空整周</button>
 </div>
 
 <div class="week" id="week"></div>
 
-<footer>餐量：2 大人 + 1 小孩（晚餐）· 家常清淡、孩子也能吃 · 数据存本机浏览器 · 可转发 HTML</footer>
+<footer id="footText">餐量：2 大人 + 1 小孩（晚餐）· 家常清淡、孩子也能吃 · 数据存本机浏览器 · 可转发 HTML</footer>
 
 <!-- picker -->
 <div class="overlay" id="picker" onclick="if(event.target===this)closePicker()">
@@ -203,7 +226,7 @@
     <div class="top">
       <button class="close" onclick="closePicker()">×</button>
       <h2 id="pickerTitle">选择菜品</h2>
-      <div class="sub">点一下即加入当天晚餐，可加多道</div>
+      <div class="sub" id="pickerSub">点一下即加入当天晚餐，可加多道</div>
       <div class="daynav" id="daynav"></div>
     </div>
     <div class="search"><input id="psearch" type="text" placeholder="🔍 搜菜名 / 食材"></div>
@@ -343,50 +366,171 @@ const DISHES = [
    steps:"1. 鸡蛋打散，胡萝卜青菜切碎加入，加面粉盐调成糊。\n2. 小火摊成薄饼。\n3. 两面煎金黄即可。"}
 ];
 
+/* ===== 早餐菜单：独立数据，与原晚餐菜单完全隔离 =====
+   nutri 标签用于「一键均衡搭配」：蛋白 / 碳水 / 蔬果 / 饮品 / 果蔬（组合）
+   早餐三要求：① 营养搭配均衡 ② 做法简单、食材易得 ③ 准备时间短 */
+const BREAKFAST = [
+  /* —— 蛋白质 —— */
+  {cat:"蛋白质",nutri:"蛋白",emoji:"🥚",name:"水煮蛋",time:"8分钟",
+   ings:[["鸡蛋","3个"],["盐","少许"]],
+   steps:"1. 鸡蛋冷水下锅。\n2. 水开后煮7-8分钟。\n3. 捞出过凉，撒少许盐。"},
+  {cat:"蛋白质",nutri:"蛋白",emoji:"🍳",name:"香煎蛋",time:"5分钟",
+   ings:[["鸡蛋","3个"],["食用油","1勺"],["盐","少许"]],
+   steps:"1. 平底锅热油。\n2. 打入鸡蛋，小火煎至蛋白凝固、蛋黄溏心。\n3. 撒盐出锅。"},
+  {cat:"蛋白质",nutri:"蛋白",emoji:"🥚",name:"蒸蛋羹",time:"15分钟",
+   ings:[["鸡蛋","3个"],["温水","适量"],["盐","少许"],["香油","几滴"]],
+   steps:"1. 鸡蛋打散，加约1.5倍温水和盐搅匀过筛。\n2. 盖保鲜膜扎孔，水开中火蒸8分钟。\n3. 淋几滴香油。"},
+  {cat:"蛋白质",nutri:"蛋白",emoji:"🥛",name:"热牛奶",time:"即食",
+   ings:[["纯牛奶","3杯(约600ml)"]],
+   steps:"1. 牛奶倒入杯中。\n2. 微波炉加热40秒或隔水温热即可。"},
+  {cat:"蛋白质",nutri:"蛋白",emoji:"🥣",name:"酸奶坚果杯",time:"3分钟",
+   ings:[["酸奶","3杯"],["混合坚果","1把"],["蓝莓","1盒(可选)"]],
+   steps:"1. 酸奶倒入杯中。\n2. 撒上坚果，点缀蓝莓。"},
+  /* —— 碳水主食 —— */
+  {cat:"碳水主食",nutri:"碳水",emoji:"🥣",name:"牛奶燕麦粥",time:"5分钟",
+   ings:[["即食燕麦","60克"],["牛奶","300ml"],["蜂蜜","半勺(可选)"]],
+   steps:"1. 燕麦放入碗中。\n2. 冲入热牛奶搅匀。\n3. 静置2分钟，可加蜂蜜。"},
+  {cat:"碳水主食",nutri:"碳水",emoji:"🍚",name:"白粥",time:"30分钟",
+   ings:[["大米","1杯(约120克)"],["水","适量"]],
+   steps:"1. 大米淘洗入锅。\n2. 加水没过米约两指。\n3. 煮饭/煮粥模式30分钟（可预约更省时）。"},
+  {cat:"碳水主食",nutri:"碳水",emoji:"🍞",name:"全麦吐司",time:"即食",
+   ings:[["全麦吐司","3片"]],
+   steps:"1. 吐司直接食用，或小火微烤。\n2. 可夹煎蛋、番茄片。"},
+  {cat:"碳水主食",nutri:"碳水",emoji:"🥟",name:"蒸馒头/包子",time:"10分钟",
+   ings:[["速冻馒头","3个"],["水","适量"]],
+   steps:"1. 馒头摆入蒸笼。\n2. 水开上锅中火蒸8-10分钟。"},
+  {cat:"碳水主食",nutri:"碳水",emoji:"🌽",name:"蒸玉米",time:"15分钟",
+   ings:[["玉米","2根"],["水","适量"]],
+   steps:"1. 玉米洗净放入锅。\n2. 加水没过，煮12-15分钟。"},
+  {cat:"碳水主食",nutri:"碳水",emoji:"🍠",name:"蒸红薯",time:"20分钟",
+   ings:[["红薯","2个"],["水","适量"]],
+   steps:"1. 红薯洗净。\n2. 蒸锅上汽后蒸18-20分钟至软。"},
+  {cat:"碳水主食",nutri:"碳水",emoji:"🍜",name:"阳春面",time:"10分钟",
+   ings:[["细面条","2-3人份"],["生抽","1勺"],["香油","几滴"],["葱花","少许"]],
+   steps:"1. 水开下面条煮熟。\n2. 碗里放生抽、香油、葱花。\n3. 捞面浇汤，拌匀。"},
+  /* —— 蔬果 —— */
+  {cat:"蔬果",nutri:"蔬果",emoji:"🥒",name:"拌黄瓜",time:"5分钟",
+   ings:[["黄瓜","1根"],["蒜","2瓣"],["醋","1勺"],["生抽","半勺"],["香油","几滴"],["盐","少许"]],
+   steps:"1. 黄瓜拍裂切段，加盐腌5分钟倒掉水。\n2. 蒜末、醋、生抽、香油调汁。\n3. 浇上拌匀。"},
+  {cat:"蔬果",nutri:"蔬果",emoji:"🍅",name:"番茄切片",time:"3分钟",
+   ings:[["番茄","1个"]],
+   steps:"1. 番茄洗净。\n2. 切成薄片装盘。"},
+  {cat:"蔬果",nutri:"蔬果",emoji:"🍅",name:"圣女果",time:"即食",
+   ings:[["圣女果","1盒"]],
+   steps:"1. 圣女果洗净装盘即可。"},
+  {cat:"蔬果",nutri:"蔬果",emoji:"🍎",name:"苹果香蕉",time:"即食",
+   ings:[["苹果","1个"],["香蕉","1根"]],
+   steps:"1. 水果洗净。\n2. 苹果切片、香蕉去皮装盘。"},
+  {cat:"蔬果",nutri:"蔬果",emoji:"🥬",name:"凉拌菠菜",time:"8分钟",
+   ings:[["菠菜","200克"],["蒜","2瓣"],["生抽","半勺"],["香油","几滴"],["盐","少许"]],
+   steps:"1. 菠菜焯水切段。\n2. 蒜末、生抽、香油、盐调汁拌匀。"},
+  /* —— 饮品 —— */
+  {cat:"饮品",nutri:"饮品",emoji:"🥛",name:"豆浆",time:"即食",
+   ings:[["豆浆","3杯"]],
+   steps:"1. 市售豆浆或豆浆粉冲调。\n2. 温热饮用。"},
+  {cat:"饮品",nutri:"饮品",emoji:"🥣",name:"五谷米糊",time:"5分钟",
+   ings:[["五谷杂粮粉","3勺"],["热水","适量"]],
+   steps:"1. 杂粮粉放入杯中。\n2. 冲入热水搅匀。"},
+  {cat:"饮品",nutri:"饮品",emoji:"🍋",name:"蜂蜜柠檬水",time:"2分钟",
+   ings:[["柠檬","半个"],["蜂蜜","1勺"],["温水","适量"]],
+   steps:"1. 柠檬挤汁入杯。\n2. 加蜂蜜、温水搅匀。"},
+  /* —— 快手组合（已含均衡结构，单道即可） —— */
+  {cat:"快手组合",nutri:"果蔬",emoji:"🥪",name:"元气三明治",time:"8分钟",
+   ings:[["全麦吐司","3片"],["鸡蛋","3个"],["番茄","1个"],["生菜","3片"],["沙拉酱","适量"]],
+   steps:"1. 鸡蛋煎熟。\n2. 吐司铺煎蛋、番茄片、生菜。\n3. 挤少许沙拉酱，合上。"},
+  {cat:"快手组合",nutri:"果蔬",emoji:"🥣",name:"燕麦水果杯",time:"3分钟",
+   ings:[["即食燕麦","60克"],["牛奶","300ml"],["香蕉","1根"],["蓝莓","1盒"]],
+   steps:"1. 燕麦加牛奶。\n2. 香蕉切片、蓝莓铺上。"},
+  {cat:"快手组合",nutri:"果蔬",emoji:"🍚",name:"中式快手碗",time:"10分钟",
+   ings:[["白粥","2碗"],["鸡蛋","3个"],["榨菜","1包"],["香油","几滴"]],
+   steps:"1. 热粥盛碗。\n2. 煮鸡蛋对半切放入。\n3. 配榨菜，淋香油。"}
+];
+const CAT_BREAKFAST = ["蛋白质","碳水主食","蔬果","饮品","快手组合"];
+
 const DAYS = ["周一","周二","周三","周四","周五","周六"];
 const CAT_ORDER = ["荤香佳肴","时蔬素味","汤羹","主食"];
 const STORE = "familyWeekMenu_v1";
 let plan = {};
 DAYS.forEach(d=>plan[d]=[]);
 let curDay = "周一";
+let curModule = "dinner";   /* 'dinner' = 晚餐 / 'breakfast' = 早餐 */
 
+/* 早餐：独立存储键，与晚餐互不影响 */
+const BSTORE = "familyBreakfastMenu_v1";
+let bplan = {};
+DAYS.forEach(d=>bplan[d]=[]);
 try{const s=localStorage.getItem(STORE); if(s){const o=JSON.parse(s); DAYS.forEach(d=>{if(Array.isArray(o[d]))plan[d]=o[d];});}}catch(e){}
-function save(){try{localStorage.setItem(STORE,JSON.stringify(plan));}catch(e){}}
+try{const s=localStorage.getItem(BSTORE); if(s){const o=JSON.parse(s); DAYS.forEach(d=>{if(Array.isArray(o[d]))bplan[d]=o[d];});}}catch(e){}
+try{const m=localStorage.getItem("familyMenuModule"); if(m==='breakfast'||m==='dinner')curModule=m;}catch(e){}
+
+/* 模块分发：当前模块对应的 计划 / 菜品数据 / 分类顺序 */
+function curPlan(){return curModule==='breakfast'?bplan:plan;}
+function curDishes(){return curModule==='breakfast'?BREAKFAST:DISHES;}
+function curCats(){return curModule==='breakfast'?CAT_BREAKFAST:CAT_ORDER;}
+function save(){try{localStorage.setItem(curModule==='breakfast'?BSTORE:STORE,JSON.stringify(curPlan()));}catch(e){}}
 
 const weekEl=document.getElementById('week');
 function renderWeek(){
+  const P=curPlan(),D=curDishes();
+  const label=curModule==='breakfast'?'早餐':'晚餐';
   weekEl.innerHTML = DAYS.map(d=>{
-    const picks = plan[d].map(idx=>{
-      const x=DISHES[idx];
+    const arr=Array.isArray(P[d])?P[d]:[];
+    const picks = arr.map(idx=>{
+      const x=D[idx];
+      if(!x) return '';                       // 容错：索引越界/数据损坏则跳过，避免整页渲染失败
       return `<div class="pick"><span class="pe">${x.emoji}</span><span class="pn" onclick="openDetail(${idx})">${x.name}</span>
         <button class="rm" onclick="removeDish('${d}',${idx})">×</button></div>`;
-    }).join('');
+    }).filter(Boolean).join('');
     return `<div class="day">
-      <div class="dname">${d}<small>晚餐</small></div>
+      <div class="dname">${d}<small>${label}</small></div>
       <div class="picks">${picks||'<div class=\"empty\">未安排</div>'}</div>
       <button class="addbtn" onclick="openPicker('${d}')">＋ 添加菜品</button>
     </div>`;
   }).join('');
 }
-function removeDish(d,idx){plan[d]=plan[d].filter(i=>i!==idx);save();renderWeek();}
-function clearAll(){if(confirm('确定清空整周安排？')){DAYS.forEach(d=>plan[d]=[]);save();renderWeek();}}
+function removeDish(d,idx){const P=curPlan();P[d]=P[d].filter(i=>i!==idx);save();renderWeek();}
+/* 清空整周：清空「当前模块」下周一至周六的全部安排（仅清当前模块，与另一模块互不干扰） */
+function clearAll(){
+  const label=curModule==='breakfast'?'早餐':'晚餐';
+  askConfirm('确定清空整周'+label+'安排？\n（共 '+DAYS.length+' 天，'+curPlanCount()+' 道菜将被移除，操作不可撤销）',()=>{
+    clearWeek(curModule);
+    showToast('已清空整周'+label+'安排');
+    renderWeek();
+  });
+}
+/* 真正执行清空：重置内存对象 + 写入存储，并清理可能残留的非标准键（如历史遗留的「周日」） */
+function clearWeek(module){
+  const P=(module==='breakfast')?bplan:plan;
+  const keys=Object.keys(P);
+  keys.forEach(k=>{ delete P[k]; });          // 先清掉所有键（含跨月/历史遗留键）
+  DAYS.forEach(d=>{ P[d]=[]; });               // 再按标准 6 天重置为空数组
+  try{
+    const store=(module==='breakfast')?BSTORE:STORE;
+    localStorage.setItem(store,JSON.stringify(P));
+  }catch(e){}
+}
+function curPlanCount(){const P=curPlan();return DAYS.reduce((n,d)=>n+P[d].length,0);}
 
 const picker=document.getElementById('picker');
-function openPicker(d){curDay=d;document.getElementById('pickerTitle').textContent='为 '+d+' 晚餐选择菜品';
+function openPicker(d){curDay=d;const label=curModule==='breakfast'?'早餐':'晚餐';
+  document.getElementById('pickerTitle').textContent='为 '+d+' '+label+'选择菜品';
+  document.getElementById('pickerSub').textContent='点一下即加入当天'+label+'，可加多道（已加显示「✓ 已加入」）';
   renderDayNav();renderPList();picker.classList.add('show');}
 function closePicker(){picker.classList.remove('show');}
 function renderDayNav(){
   document.getElementById('daynav').innerHTML=DAYS.map(d=>
     `<button onclick="switchDay('${d}')" style="${d===curDay?'background:var(--accent);color:#fff;border-color:var(--accent)':''}">${d}</button>`).join('');
 }
-function switchDay(d){curDay=d;document.getElementById('pickerTitle').textContent='为 '+d+' 晚餐选择菜品';renderDayNav();}
+function switchDay(d){curDay=d;const label=curModule==='breakfast'?'早餐':'晚餐';
+  document.getElementById('pickerTitle').textContent='为 '+d+' '+label+'选择菜品';renderDayNav();}
 function renderPList(){
   const kw=document.getElementById('psearch').value.trim();
-  const cur=plan[curDay];
-  const list=DISHES.map((x,i)=>({x,i})).filter(o=>!kw||o.x.name.includes(kw)||o.x.ings.some(g=>g[0].includes(kw)));
+  const cur=curPlan()[curDay];
+  const D=curDishes();
+  const list=D.map((x,i)=>({x,i})).filter(o=>!kw||o.x.name.includes(kw)||o.x.ings.some(g=>g[0].includes(kw)));
   if(!list.length){document.getElementById('plist').innerHTML='<p style="color:var(--muted);padding:16px">没有匹配</p>';return;}
   let html='';
-  CAT_ORDER.forEach(cat=>{
+  curCats().forEach(cat=>{
     const items=list.filter(o=>o.x.cat===cat);
     if(!items.length)return;
     html+=`<div class="cat">${cat}</div>`;
@@ -400,12 +544,24 @@ function renderPList(){
   document.getElementById('plist').innerHTML=html;
 }
 function toggleDish(idx){
-  const arr=plan[curDay];const p=arr.indexOf(idx);
-  if(p>=0){arr.splice(p,1);} else {arr.push(idx);showToast('已加入 '+curDay+' 晚餐');}
+  const arr=curPlan()[curDay];const p=arr.indexOf(idx);
+  const label=curModule==='breakfast'?'早餐':'晚餐';
+  if(p>=0){arr.splice(p,1);} else {arr.push(idx);showToast('已加入 '+curDay+' '+label);}
   save();renderWeek();renderPList();
 }
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),1200);}
+
+/* 通用确认弹窗：替代原生 confirm()，在 iOS 主屏独立模式下也能正常弹出 */
+let _cfmCb=null;
+function askConfirm(msg,onYes){
+  document.getElementById('cfmMsg').textContent=msg;
+  _cfmCb=onYes;
+  document.getElementById('cfm').classList.add('show');
+}
+function closeCfm(){document.getElementById('cfm').classList.remove('show');_cfmCb=null;}
+document.getElementById('cfmYes').addEventListener('click',()=>{const cb=_cfmCb;closeCfm();if(cb)cb();});
+
 document.getElementById('psearch').addEventListener('input',renderPList);
 
 function parseAmt(a){
@@ -423,11 +579,12 @@ function round(n){return Number.isInteger(n)?n:(Math.round(n*10)/10);}
 const EXCLUDE_SET=new Set(['盐','白糖','冰糖','生抽','老抽','醋','料酒','香油','淀粉','蚝油','蒸鱼豉油','八角','白芝麻','水','热水']);
 function getShopRows(){
   const map={};let total=0;
-  DAYS.forEach(d=>plan[d].forEach(idx=>{
+  const P=curPlan(),D=curDishes();
+  DAYS.forEach(d=>P[d].forEach(idx=>{
     total++;
-    DISHES[idx].ings.forEach(([name,amt])=>{
+    D[idx].ings.forEach(([name,amt])=>{
       if(!map[name])map[name]={free:false,units:{},dishes:new Set()};
-      map[name].dishes.add(DISHES[idx].name);
+      map[name].dishes.add(D[idx].name);
       const p=parseAmt(amt);
       if(p.free)map[name].free=true;
       else{const u=map[name].units;if(!u[p.unit])u[p.unit]={nums:[],ranges:[]};
@@ -450,8 +607,9 @@ function getShopRows(){
 
 function genShop(){
   const {rows,total}=getShopRows();
-  if(total===0){alert('本周还没安排任何菜，先去添加吧～');return;}
-  document.getElementById('shopSub').textContent='共 '+total+' 道菜 · 合并后 '+rows.length+' 种食材';
+  const label=curModule==='breakfast'?'早餐':'晚餐';
+  if(total===0){showToast('本周还没安排任何'+label+'，先去添加吧～');return;}
+  document.getElementById('shopSub').textContent=label+'共 '+total+' 道 · 合并后 '+rows.length+' 种食材';
   document.getElementById('shoplist').innerHTML=rows.map(r=>
     `<li><span>${r.name}<span class="sd">用于：${r.dishes.join('、')}</span></span>
      <span class="sa">${r.amt}</span></li>`).join('');
@@ -460,19 +618,56 @@ function genShop(){
 }
 function closeShop(){document.getElementById('shop').classList.remove('show');document.body.classList.remove('print-shop');}
 
+/* ===== 模块切换 / 早餐均衡搭配 ===== */
+function switchModule(m){
+  curModule=m;
+  try{localStorage.setItem("familyMenuModule",m);}catch(e){}
+  applyModuleUI();
+  renderWeek();
+  if(document.getElementById('picker').classList.contains('show')){openPicker(curDay);}
+}
+function applyModuleUI(){
+  const isB=curModule==='breakfast';
+  document.getElementById('tabDinner').classList.toggle('active',!isB);
+  document.getElementById('tabBreakfast').classList.toggle('active',isB);
+  document.getElementById('btnBalance').style.display=isB?'inline-block':'none';
+  document.getElementById('hTitle').textContent=isB?'🌞 家庭一周早餐菜单':'🗓 家庭一周晚餐菜单';
+  document.getElementById('hSub').textContent=isB?'早起几分钟 · 营养快手早餐 · 自动合并采购清单':'周末排好下周 · 自动合并采购清单';
+  document.getElementById('footText').textContent=isB
+    ? '餐量：2 大人 + 1 小孩（早餐）· 营养搭配均衡(蛋白+碳水+蔬果)、做法简单、准备时间短 · 数据存本机浏览器 · 可转发 HTML'
+    : '餐量：2 大人 + 1 小孩（晚餐）· 家常清淡、孩子也能吃 · 数据存本机浏览器 · 可转发 HTML';
+}
+/* 一键为每天搭配均衡早餐：蛋白 + 碳水 + 蔬果 各一道 */
+function autoBalance(){
+  if(curModule!=='breakfast')return;
+  const groups={蛋白:[],碳水:[],蔬果:[]};
+  BREAKFAST.forEach((x,i)=>{if(groups[x.nutri])groups[x.nutri].push(i);});
+  DAYS.forEach(d=>{
+    bplan[d]=[];
+    ['蛋白','碳水','蔬果'].forEach(g=>{
+      const arr=groups[g];
+      if(arr.length)bplan[d].push(arr[Math.floor(Math.random()*arr.length)]);
+    });
+  });
+  save();renderWeek();
+  showToast('已为每天搭配：蛋白 + 碳水 + 蔬果');
+}
+
 renderWeek();
 loadSettings();
 bindSettings();
+applyModuleUI();
 
 /* dish detail */
 function openDetail(idx){
-  const d=DISHES[idx];
+  const d=curDishes()[idx];
+  const label=curModule==='breakfast'?'早餐':'晚餐';
   document.getElementById('detailSheet').innerHTML=
     `<div class="top">
        <button class="close" onclick="closeDetail()">×</button>
        <div style="font-size:40px">${d.emoji}</div>
        <h2>${d.name}</h2>
-       <div class="sub">${d.cat} · 约 ${d.time} · 2大1小（晚餐）</div>
+       <div class="sub">${d.cat} · 约 ${d.time} · 2大1小（${label}）</div>
      </div>
      <div class="sec"><h3>🧺 材料清单</h3>
        <ul class="ing">${d.ings.map(x=>`<li><span>${x[0]}</span><span class="amt">${x[1]}</span></li>`).join('')}</ul>
@@ -497,10 +692,14 @@ function drawWrapped(ctx,text,x,y,maxW,lh,font,color){
 }
 function buildShareCanvas(kind){
   const W=750,scale=2,pad=40,F='"PingFang SC","Microsoft YaHei",sans-serif';
+  const P=curPlan(),D=curDishes();
+  const isB=curModule==='breakfast';
+  const titleMain=isB?'家庭一周早餐菜单':'家庭一周晚餐菜单';
+  const titleSub=isB?'2 大 1 小 · 周一至周六 · 营养快手':'2 大 1 小 · 周一至周六 · 家常清淡';
   let totalH=150,blocks=[];
   if(kind==='menu'){
     DAYS.forEach(d=>{
-      const items=plan[d].map(i=>({e:DISHES[i].emoji,n:DISHES[i].name}));
+      const items=P[d].map(i=>({e:D[i].emoji,n:D[i].name}));
       blocks.push({day:d,items});
       totalH+=44+Math.max(1,items.length)*40+20;
     });
@@ -519,9 +718,9 @@ function buildShareCanvas(kind){
   ctx.fillStyle=g;ctx.fillRect(0,0,W,150);
   ctx.fillStyle='#fff';ctx.textAlign='center';
   ctx.font='bold 40px '+F;
-  ctx.fillText(kind==='menu'?'家庭一周晚餐菜单':'周末采购清单',W/2,60);
+  ctx.fillText(kind==='menu'?titleMain:'周末采购清单',W/2,60);
   ctx.font='22px '+F;
-  ctx.fillText(kind==='menu'?'2 大 1 小 · 周一至周六 · 家常清淡':'共 '+getShopRows().total+' 道菜 · 已自动剔除调味品',W/2,100);
+  ctx.fillText(kind==='menu'?titleSub:'共 '+getShopRows().total+' 道菜 · 已自动剔除调味品',W/2,100);
   let y=150+34;
   if(kind==='menu'){
     blocks.forEach(b=>{
@@ -550,7 +749,7 @@ function buildShareCanvas(kind){
 function buildShareImage(kind){return buildShareCanvas(kind).toDataURL('image/png');}
 function openShare(){
   const test=getShopRows();
-  if(test.total===0){alert('请先安排菜品、生成采购清单后再分享～');return;}
+  if(test.total===0){showToast('请先安排菜品、生成采购清单后再分享～');return;}
   if(SET.autoShare && canShareFiles()){
     shareViaSystem();
   }else{
@@ -578,7 +777,8 @@ async function shareViaSystem(){
     const f1=await canvasToFile(buildShareCanvas('menu'),fileName('menu'),mime());
     const f2=await canvasToFile(buildShareCanvas('shop'),fileName('shop'),mime());
     if(navigator.canShare && !navigator.canShare({files:[f1,f2]})){fallbackModal();return;}
-    await navigator.share({files:[f1,f2],text:SET.note||'本周晚餐菜单 & 采购清单',title:'家庭一周晚餐菜单'});
+    const t=curModule==='breakfast'?'家庭一周早餐菜单':'家庭一周晚餐菜单';
+    await navigator.share({files:[f1,f2],text:SET.note||(t+' & 采购清单'),title:t});
     showToast('已调起系统分享：选「微信」发给好友，或存到照片/文件');
   }catch(e){
     if(e&&e.name==='AbortError')return; // 用户取消，静默
@@ -601,11 +801,16 @@ function closeSettings(){document.getElementById('settings').classList.remove('s
 function bindSettings(){
   const auto=document.getElementById('setAuto');
   auto.addEventListener('change',e=>{
-    if(e.target.checked && !confirm('开启后，点击「分享图片」会直接调起系统分享面板：可一键选「微信」发给好友，或存到照片/文件。是否开启？')){
-      e.target.checked=false;return;
+    if(e.target.checked){
+      e.target.checked=false;   // 先复位，确认后再开启，保证可见反馈
+      askConfirm('开启后，点击「分享图片」会直接调起系统分享面板：可一键选「微信」发给好友，或存到照片/文件。是否开启？',()=>{
+        e.target.checked=true;SET.autoShare=true;saveSettings();
+        showToast('已开启一键分享');
+      });
+      return;
     }
-    SET.autoShare=e.target.checked;saveSettings();
-    showToast(SET.autoShare?'已开启一键分享':'已关闭，恢复手动长按保存');
+    SET.autoShare=false;saveSettings();
+    showToast('已关闭，恢复手动长按保存');
   });
   document.getElementById('setFmt').addEventListener('change',e=>{SET.format=e.target.value;saveSettings();});
   document.getElementById('setName').addEventListener('input',e=>{SET.name=e.target.value;saveSettings();});
@@ -648,6 +853,18 @@ function bindSettings(){
     <div class="sheetfoot"><button class="btn primary" style="width:100%;padding:14px;font-size:16px" onclick="closeSettings()">完成</button></div>
   </div>
 </div>
+
+<!-- 通用确认弹窗：替代原生 confirm，iOS 主屏独立模式也能正常弹出 -->
+<div class="overlay cfm" id="cfm" onclick="if(event.target===this)closeCfm()">
+  <div class="sheet">
+    <div class="cm" id="cfmMsg">确定执行该操作？</div>
+    <div class="crow">
+      <button class="no" onclick="closeCfm()">取消</button>
+      <button class="yes" id="cfmYes">确定</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 </body>
 </html>
